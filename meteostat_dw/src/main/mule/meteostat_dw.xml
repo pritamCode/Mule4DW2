@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+	<http:request-config name="HTTP_Request_configuration" doc:name="HTTP Request configuration" doc:id="1f7083ba-9a2b-4386-ba1e-f65da697cc8b" >
+		<http:request-connection host="api.meteostat.net" protocol="HTTPS"/>
+	</http:request-config>
+	<http:listener-config name="HTTP_Listener_config" doc:name="HTTP Listener config" doc:id="1995cad1-31f8-4eee-9e42-7919bc238e2a" >
+		<http:listener-connection host="0.0.0.0" port="8081" />
+	</http:listener-config>
+	<flow name="maxTempByGivenMonth" doc:id="f03636dd-e5c5-4b14-a527-1544db79fe3d" >
+		<http:listener doc:name="Listener" doc:id="c2f38090-4c1b-4f67-ac32-632945e652c1" path="/maxTemp" config-ref="HTTP_Listener_config"/>
+		<set-variable value="#[attributes.queryParams.month default 1 as Number]" doc:name="Set Variable" doc:id="af18cd6b-d829-47a6-b187-0e694ed26d0a" variableName="month"/>
+		<http:request method="GET" doc:name="Request" doc:id="f45350bf-ee21-4258-87d8-858162a3a991" config-ref="HTTP_Request_configuration" path="/v1/history/daily">
+			<http:query-params ><![CDATA[#[output application/java
+---
+{
+	"station" : "10637",
+	"start" : "2018-01-01",
+	"end" : "2018-12-31",
+	"key" : "lR0cZrnk"
+}]]]></http:query-params>
+		</http:request>
+		<ee:transform doc:name="Transform Message" doc:id="3d77b1d8-a615-4e79-be68-625ce42c031d" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+fun getMonth(data : String) =
+   data[5 to 6] as Number
+---
+
+using( tempData = (payload.data filter((item, index) -> getMonth(item.date) ~= vars.month))
+    filter ((item, index) -> item.temperature != null) )
+
+max(tempData.temperature)]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</flow>
+	<flow name="avgPrecipitation" doc:id="7665279b-ff30-4203-b748-d0d4f52e4789" >
+		<http:listener doc:name="Listener" doc:id="3a8fde5f-11f6-420e-9872-57ea557a7f39" path="/avgPrecipitation" config-ref="HTTP_Listener_config"/>
+		<http:request method="GET" doc:name="Request" doc:id="c93140c3-0155-4bb0-ae03-2678fc990d6a" config-ref="HTTP_Request_configuration" path="/v1/history/daily">
+			<http:query-params ><![CDATA[#[output application/java
+---
+{
+	"station" : "10637",
+	"start" : "2018-01-01",
+	"end" : "2018-12-31",
+	"key" : "lR0cZrnk"
+}]]]></http:query-params>
+		</http:request>
+		<ee:transform doc:name="Transform Message" doc:id="5bb5e80e-019e-4fef-8a01-a8152b39a2b4" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json skipNullOn="everywhere"
+
+fun avgP(data: Array) = do{
+        var count = sizeOf(data)
+        var total = data reduce ((item, accumulator =0) -> if(item !=null) accumulator + item else accumulator )
+        ---
+        (total / count ) as Number {format : "##.00"}
+}
+---
+
+using(data = (payload.data groupBy ((item, index) -> item.date[5 to 6])))
+{
+   "Jan" : avgP(data."01".*precipitation),
+   "FEB" : avgP(data."02".*precipitation),
+   "MAR" : avgP(data."03".*precipitation),
+   "APR" : avgP(data."04".*precipitation),
+   "May" : avgP(data."05".*precipitation),
+   "Jun" : avgP(data."06".*precipitation),
+   "July" : avgP(data."07".*precipitation),
+   "Aug" : avgP(data."08".*precipitation),
+   "Sep" : avgP(data."09".*precipitation),
+   "Oct" : avgP(data."10".*precipitation),
+   "Nov" : avgP(data."11".*precipitation),
+   "Dec" : avgP(data."12".*precipitation),
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</flow>
+	<flow name="LowestTempPerWeek" doc:id="dd4166ea-4f8d-45d0-8c68-76f7cf6d8802" >
+		<http:listener doc:name="Listener" doc:id="2076fe57-ff0b-49bf-919f-a4f169b2a5fa" config-ref="HTTP_Listener_config" path="/lowestTempPerWeek"/>
+		<http:request method="GET" doc:name="Request" doc:id="b4e36dec-2afc-4e94-9c09-844dd869573a" config-ref="HTTP_Request_configuration" path="/v1/history/daily" >
+			<http:query-params ><![CDATA[#[output application/java
+---
+{
+	"station" : "10637",
+	"start" : "2018-01-01",
+	"end" : "2018-12-31",
+	"key" : "lR0cZrnk"
+}]]]></http:query-params>
+		</http:request>
+		<ee:transform doc:name="Transform Message" doc:id="94099501-d4a3-4978-9f5c-4164b033b64d" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+import * from dw::core::Arrays
+
+---
+payload.data divideBy 7
+   map ((item, index) ->{
+       "week $index" : min(item.temperature)
+   })]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</flow>
+</mule>
